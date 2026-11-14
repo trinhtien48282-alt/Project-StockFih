@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from stockfih.profiles.player import GameRecord
+from stockfih.profiles import rating
 from stockfih.profiles.statistics import Stats, outcome_for
 
 _PIECES = {
@@ -152,7 +153,9 @@ def ask_history(parent: QWidget, games: list[GameRecord]) -> str | None:
     return item.data(Qt.ItemDataRole.UserRole) if item else None
 
 
-def show_stats(parent: QWidget, stats: Stats, recent: list[GameRecord]) -> None:
+def show_stats(
+    parent: QWidget, stats: Stats, recent: list[GameRecord], ratings: list[rating.RatingChange]
+) -> None:
     dialog = QDialog(parent)
     dialog.setWindowTitle("Statistics")
     dialog.setMinimumWidth(420)
@@ -164,6 +167,20 @@ def show_stats(parent: QWidget, stats: Stats, recent: list[GameRecord]) -> None:
     ]
     if stats.unscored:
         lines.append(f"{stats.unscored} game(s) have no recorded color and are not scored.")
+    now, top = rating.current(ratings), rating.peak(ratings)
+    if now is None:
+        lines.append(
+            f"StockFih rating: not rated yet ({len(ratings)} of {rating.PROVISIONAL_GAMES} rated games)"
+        )
+    else:
+        lines.append(f"StockFih rating: {now:.0f}    Peak: {top:.0f}")
+    if ratings:
+        lines += ["", "Rating changes"]
+        for change in reversed(ratings[-5:]):
+            lines.append(
+                f"{change.played}   {change.after - change.before:+.0f}   {change.after:.0f}"
+                f"   vs {change.opponent:.0f}"
+            )
     lines += ["", "Recent games" if recent else "No finished games yet."]
     for game in recent:
         outcome = outcome_for(game.result, game.color) or "not scored"

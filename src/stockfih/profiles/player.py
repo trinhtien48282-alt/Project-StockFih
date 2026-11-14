@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from stockfih.profiles.rating import START, RatingChange, update
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
     id INTEGER PRIMARY KEY,
@@ -23,6 +25,15 @@ CREATE TABLE IF NOT EXISTS games (
     result TEXT NOT NULL,
     pgn TEXT NOT NULL,
     color TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ratings (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id),
+    played TEXT NOT NULL,
+    opponent REAL NOT NULL,
+    score REAL NOT NULL,
+    rating_before REAL NOT NULL,
+    rating_after REAL NOT NULL
 );
 """
 
@@ -61,7 +72,7 @@ class ProfileStore:
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
         if version == 1:  # v1 had no color column on games
             self._db.execute("ALTER TABLE games ADD COLUMN color TEXT NOT NULL DEFAULT ''")
-        self._db.executescript(_SCHEMA + "PRAGMA user_version = 2;")
+        self._db.executescript(_SCHEMA + "PRAGMA user_version = 3;")
 
     def close(self) -> None:
         self._db.close()
@@ -123,3 +134,30 @@ class ProfileStore:
             (profile_id,),
         )
         return [GameRecord(*row) for row in rows]
+
+    def rating_history(self, profile_id: int) -> list[RatingChange]:
+        # Oldest first. Every rated game is one entry.
+        rows = self._db.execute(
+            "SELECT id, played, opponent, score, rating_before, rating_after FROM ratings "
+            "WHERE profile_id = ? ORDER BY id",
+            (profile_id,),
+        )
+        return [RatingChange(*row) for row in rows]
+
+    def add_rated_result(self, profile_id: int, opponent: float, score: float) -> RatingChange:
+        # score: 1 win, 0.5 draw, 0 loss. Raises ValueError on anything else.
+        if score not in (0.0, 0.5, 1.0):
+            raise ValueError("Score must be 0, 0.5 or 1.")
+        if opponent <= 0:
+            raise ValueError("Opponent rating must be positive.")
+        history = self.rating_history(profile_id)
+        before = history[-1].after if history else START
+        after = update(before, opponent, score, len(history))
+        played = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with self._db:
+            cursor = self._db.execute(
+                "INSERT INTO ratings (profile_id, played, opponent, score, rating_before, rating_after) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (profile_id, played, opponent, score, before, after),
+            )
+        return RatingChange(cursor.lastrowid, played, opponent, score, before, after)

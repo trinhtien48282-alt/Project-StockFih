@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
 
     def _show_stats(self) -> None:
         games = self.store.games(self.profile.id)
-        show_stats(self, compute(games), games[:10])
+        show_stats(self, compute(games), games[:10], self.store.rating_history(self.profile.id))
 
     def _choose(self, key: str, name: str) -> None:
         self.choice[key] = name
