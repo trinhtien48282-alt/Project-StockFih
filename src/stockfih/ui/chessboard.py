@@ -1,5 +1,5 @@
 import chess
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -11,19 +11,25 @@ LAST_MOVE = QColor(155, 199, 0, 105)
 SELECTED = QColor(246, 246, 105, 150)
 CHECK = QColor(220, 50, 50, 170)
 TARGET = QColor(20, 85, 30, 120)
+SLIDE_MS = 160
 
 
 class BoardWidget(QWidget):
     changed = Signal()  # emitted whenever the game state changes
+    moved = Signal()  # emitted after the player makes a move on the board
 
     def __init__(self, game: Game) -> None:
         super().__init__()
         self.game = game
         self.flipped = False
+        self.animate = True
         self.selected: chess.Square | None = None
         self.targets: list[chess.Square] = []
         self.square_theme = next(iter(SQUARE_THEMES.values()))
         self.piece_theme = next(iter(PIECE_THEMES.values()))
+        self._anim: QVariantAnimation | None = None
+        self._moving: tuple[chess.Square, chess.Square, chess.Piece] | None = None
+        self._progress = 0.0
         self.setMinimumSize(320, 320)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -39,11 +45,49 @@ class BoardWidget(QWidget):
         self.flipped = not self.flipped
         self.update()
 
-    def refresh(self) -> None:
+    def refresh(self, animate: bool = False) -> None:
         # Call after changing the game from outside (undo, redo, new game, restart).
+        # animate=True slides the piece of the latest move (use it for forward steps only).
         self._clear()
+        if animate:
+            self._animate_last()
+        else:
+            self._stop_anim()
         self.update()
         self.changed.emit()
+
+    def _animate_last(self) -> None:
+        self._stop_anim()
+        move = self.game.last_move
+        piece = self.game.board.piece_at(move.to_square) if move else None
+        if not self.animate or piece is None:
+            return
+        self._moving = (move.from_square, move.to_square, piece)
+        self._progress = 0.0
+        anim = QVariantAnimation(self)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setDuration(SLIDE_MS)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._on_progress)
+        anim.finished.connect(self._finish_anim)
+        self._anim = anim
+        anim.start()
+
+    def _on_progress(self, value) -> None:
+        self._progress = float(value)
+        self.update()
+
+    def _finish_anim(self) -> None:
+        self._stop_anim()
+        self.update()
+
+    def _stop_anim(self) -> None:
+        if self._anim is not None:
+            self._anim.stop()
+            self._anim.deleteLater()
+            self._anim = None
+        self._moving = None
 
     def _geometry(self) -> tuple[float, float, float]:
         side = min(self.width(), self.height()) / 8
@@ -84,7 +128,9 @@ class BoardWidget(QWidget):
                     return
             self.game.move(self.selected, sq, promotion)
             self._clear()
+            self._animate_last()
             self.changed.emit()
+            self.moved.emit()
         else:
             piece = self.game.board.piece_at(sq)
             if piece and piece.color == self.game.board.turn:
@@ -99,6 +145,7 @@ class BoardWidget(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         last = self.game.last_move
         check = self.game.check_square()
+        moving = self._moving
         for sq in chess.SQUARES:
             r = self._rect(sq)
             light = (chess.square_file(sq) + chess.square_rank(sq)) % 2 == 1
@@ -110,10 +157,17 @@ class BoardWidget(QWidget):
             if sq == check:
                 p.fillRect(r, CHECK)
             piece = self.game.board.piece_at(sq)
-            if piece:
+            if piece and not (moving and sq == moving[1]):
                 self._draw_piece(p, r, piece)
             if sq in self.targets:
                 self._draw_target(p, r, occupied=piece is not None)
+        if moving:
+            start, end, piece = moving
+            a, b, t = self._rect(start), self._rect(end), self._progress
+            slide = QRectF(
+                a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t, a.width(), a.height()
+            )
+            self._draw_piece(p, slide, piece)
 
     def _draw_piece(self, p: QPainter, r: QRectF, piece: chess.Piece) -> None:
         font = QFont()

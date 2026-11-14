@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QByteArray, QSettings
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,6 +14,7 @@ from stockfih.chess.game import Game
 from stockfih.ui.chessboard import BoardWidget
 from stockfih.ui.dialogs import ask_fen, ask_game_info, ask_open_pgn, ask_save_pgn
 from stockfih.ui.sidebar import Sidebar
+from stockfih.ui.sounds import Sounds
 from stockfih.ui.themes import PIECE_THEMES, SQUARE_THEMES
 
 
@@ -28,9 +29,13 @@ class MainWindow(QMainWindow):
         }
         self.game = Game()
         self.board = BoardWidget(self.game)
+        self.sounds = Sounds(self)
+        self.board.animate = self.settings.value("animate", True, type=bool)
+        self.sounds.enabled = self.settings.value("sound", True, type=bool)
         self.sidebar = Sidebar()
         self.sidebar.setFixedWidth(240)
         self.board.changed.connect(self._refresh)
+        self.board.moved.connect(self._play_move_sound)
         self._apply_themes()
 
         file_menu = self.menuBar().addMenu("File")
@@ -48,6 +53,9 @@ class MainWindow(QMainWindow):
         view = self.menuBar().addMenu("View")
         self._theme_menu(view, "Square theme", "square", SQUARE_THEMES)
         self._theme_menu(view, "Piece theme", "piece", PIECE_THEMES)
+        view.addSeparator()
+        self._option(view, "Animate moves", "animate", self.board, "animate")
+        self._option(view, "Sound", "sound", self.sounds, "enabled")
 
         side = QVBoxLayout()
         side.addWidget(self.sidebar, 1)
@@ -55,7 +63,7 @@ class MainWindow(QMainWindow):
             ("New game", ("Ctrl+N",), self._act(self.game.new_game)),
             ("Restart", ("Ctrl+R",), self._act(self.game.restart)),
             ("Undo", ("Ctrl+Z", "Left"), self._act(self.game.undo)),
-            ("Redo", ("Ctrl+Y", "Right"), self._act(self.game.redo)),
+            ("Redo", ("Ctrl+Y", "Right"), self._act(self.game.redo, forward=True)),
             ("Flip board", ("F",), self.board.flip),
         )
         for label, keys, slot in controls:
@@ -70,8 +78,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.board, 1)
         layout.addLayout(side)
         self.setCentralWidget(root)
-        self.resize(1000, 760)
+        saved = self.settings.value("geometry")
+        if not (
+            isinstance(saved, (QByteArray, bytes)) and self.restoreGeometry(QByteArray(saved))
+        ):
+            self.resize(1000, 760)
         self._refresh()
+
+    def closeEvent(self, event) -> None:
+        self.settings.setValue("geometry", self.saveGeometry())
+        super().closeEvent(event)
 
     def _saved(self, key: str, themes: dict) -> str:
         # Stored value is external data: fall back to the default if it is unknown.
@@ -89,6 +105,19 @@ class MainWindow(QMainWindow):
             group.addAction(action)
             menu.addAction(action)
 
+    def _option(self, view, label: str, key: str, target, attr: str) -> None:
+        # A checkable on/off setting: flips target.attr and remembers it between runs.
+        action = QAction(label, self)
+        action.setCheckable(True)
+        action.setChecked(getattr(target, attr))
+
+        def toggled(on: bool) -> None:
+            setattr(target, attr, on)
+            self.settings.setValue(key, on)
+
+        action.toggled.connect(toggled)
+        view.addAction(action)
+
     def _choose(self, key: str, name: str) -> None:
         self.choice[key] = name
         self.settings.setValue(key, name)
@@ -99,12 +128,23 @@ class MainWindow(QMainWindow):
             SQUARE_THEMES[self.choice["square"]], PIECE_THEMES[self.choice["piece"]]
         )
 
-    def _act(self, change):
+    def _act(self, change, forward: bool = False):
+        # forward=True: stepping ahead in the game (redo), so slide the piece and play a sound.
         def run() -> None:
-            change()
-            self.board.refresh()
+            done = change()
+            self.board.refresh(animate=forward and bool(done))
+            if forward and done:
+                self._play_move_sound()
 
         return run
+
+    def _play_move_sound(self) -> None:
+        if self.game.outcome() is not None:
+            self.sounds.play("end")
+        elif self.game.last_capture:
+            self.sounds.play("capture")
+        else:
+            self.sounds.play("move")
 
     def _open_pgn(self) -> None:
         path = ask_open_pgn(self)

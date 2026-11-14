@@ -20,6 +20,7 @@ class Game:
         self.board = chess.Board()
         self._redo: list[chess.Move] = []
         self.headers = pgn_io.default_headers()
+        self.last_capture = False  # did the latest move played or redone capture?
 
     def outcome(self) -> chess.Outcome | None:
         # Mate, stalemate, insufficient material, 75-move, fivefold: python-chess ends these itself.
@@ -52,6 +53,7 @@ class Game:
         move = chess.Move(from_sq, to_sq, promotion=promotion)
         if self.outcome() is not None or move not in self.board.legal_moves:
             return False
+        self.last_capture = self.board.is_capture(move)
         self.board.push(move)
         self._redo.clear()
         self.headers.pop("Result", None)  # an imported result no longer applies
@@ -66,7 +68,9 @@ class Game:
     def redo(self) -> bool:
         if not self._redo:
             return False
-        self.board.push(self._redo.pop())
+        move = self._redo.pop()
+        self.last_capture = self.board.is_capture(move)
+        self.board.push(move)
         return True
 
     def new_game(self) -> None:
