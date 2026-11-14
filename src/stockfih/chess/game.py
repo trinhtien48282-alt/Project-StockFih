@@ -6,9 +6,17 @@ class Game:
         self.board = chess.Board()
 
     def outcome(self) -> chess.Outcome | None:
-        # claim_draw=True: threefold repetition and the fifty-move rule end the game
-        # automatically, no manual claim.
-        return self.board.outcome(claim_draw=True)
+        # Mate, stalemate, insufficient material, 75-move, fivefold: python-chess ends these itself.
+        # Threefold and 50-move are claims in real chess. We apply them automatically, but
+        # only once the position has actually occurred / the clock has actually reached it.
+        out = self.board.outcome()
+        if out is not None:
+            return out
+        if self.board.is_repetition(3):
+            return chess.Outcome(chess.Termination.THREEFOLD_REPETITION, None)
+        if self.board.is_fifty_moves():
+            return chess.Outcome(chess.Termination.FIFTY_MOVES, None)
+        return None
 
     def targets(self, square: chess.Square) -> list[chess.Square]:
         if self.outcome() is not None:
