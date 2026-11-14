@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from stockfih.chess.game import Game
 from stockfih.ui.chessboard import BoardWidget
-from stockfih.ui.dialogs import ask_fen, ask_open_pgn, ask_save_pgn
+from stockfih.ui.dialogs import ask_fen, ask_game_info, ask_open_pgn, ask_save_pgn
 from stockfih.ui.sidebar import Sidebar
 from stockfih.ui.themes import PIECE_THEMES, SQUARE_THEMES
 
@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
             ("Save PGN...", "Ctrl+S", self._save_pgn),
             ("Load FEN...", "Ctrl+L", self._load_fen),
             ("Copy FEN", "Ctrl+Shift+C", self._copy_fen),
+            ("Game info...", "Ctrl+I", self._game_info),
         ):
             action = file_menu.addAction(label)
             action.setShortcut(QKeySequence(key))
@@ -139,6 +140,17 @@ class MainWindow(QMainWindow):
     def _copy_fen(self) -> None:
         QApplication.clipboard().setText(self.game.board.fen())
         self.statusBar().showMessage("FEN copied to clipboard", 3000)
+
+    def _game_info(self) -> None:
+        values = ask_game_info(self, self.game.info(), self.game.extra_info())
+        if values is None:
+            return
+        try:
+            self.game.set_info(values)
+        except ValueError as error:
+            QMessageBox.warning(self, "Game info", str(error))
+            return
+        self._refresh()
 
     def _refresh(self) -> None:
         self.setWindowTitle(self.game.title())

@@ -1,6 +1,18 @@
+import re
+
 import chess
 
 from stockfih.chess import pgn as pgn_io
+
+# PGN date: YYYY.MM.DD, any part may be ? when unknown.
+_DATE = re.compile(r"(\d{4}|\?{4})\.(0[1-9]|1[0-2]|\?\?)\.(0[1-9]|[12]\d|3[01]|\?\?)")
+_INFO_DEFAULTS = {"White": "?", "Black": "?", "Event": "?", "Date": "????.??.??"}
+
+
+def _clean(value: str) -> str:
+    # One line, no quotes or backslashes (they would break the PGN header).
+    value = "".join(c for c in value if c not in '"\\')
+    return " ".join(value.split()) or "?"
 
 
 class Game:
@@ -85,13 +97,38 @@ class Game:
         self._redo = moves[::-1]  # step through the game with redo / undo
         self.headers = headers
 
-    def export_pgn(self) -> str:
+    def result(self) -> str:
         out = self.outcome()
         if out is not None and not self._redo:
-            result = out.result()
-        else:
-            result = self.headers.get("Result", "*")
-        return pgn_io.export_pgn(self.board, self._redo[::-1], self.headers, result)
+            return out.result()
+        return self.headers.get("Result", "*")
+
+    def export_pgn(self) -> str:
+        return pgn_io.export_pgn(self.board, self._redo[::-1], self.headers, self.result())
+
+    def info(self) -> dict[str, str]:
+        # The editable game details.
+        return {key: self.headers.get(key, default) for key, default in _INFO_DEFAULTS.items()}
+
+    def set_info(self, values: dict[str, str]) -> None:
+        # Raises ValueError and changes nothing if the date is malformed.
+        date = _clean(values["Date"])
+        if date == "?":
+            date = _INFO_DEFAULTS["Date"]
+        if not _DATE.fullmatch(date):
+            raise ValueError("Date must look like 2026.11.14 (use ? for unknown parts).")
+        for key in ("White", "Black", "Event"):
+            self.headers[key] = _clean(values[key])
+        self.headers["Date"] = date
+
+    def extra_info(self) -> dict[str, str]:
+        # Read-only details. Opening and ECO appear only if the imported PGN carried them.
+        result = self.result()
+        extra = {"Result": "unfinished" if result == "*" else result}
+        for key in ("Opening", "ECO"):
+            if key in self.headers:
+                extra[key] = self.headers[key]
+        return extra
 
     def title(self) -> str:
         white, black = self.headers.get("White", "?"), self.headers.get("Black", "?")
