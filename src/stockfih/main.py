@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 
 from stockfih.app import run
 

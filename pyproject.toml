@@ -20,3 +20,9 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.2.0",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # Third-party noise from python-chess on Python 3.14. Everything else still shows.
+    "ignore:'asyncio.DefaultEventLoopPolicy' is deprecated:DeprecationWarning",
+]
