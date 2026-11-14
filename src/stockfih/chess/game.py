@@ -4,6 +4,7 @@ import chess
 class Game:
     def __init__(self) -> None:
         self.board = chess.Board()
+        self._redo: list[chess.Move] = []
 
     def outcome(self) -> chess.Outcome | None:
         # Mate, stalemate, insufficient material, 75-move, fivefold: python-chess ends these itself.
@@ -37,7 +38,41 @@ class Game:
         if self.outcome() is not None or move not in self.board.legal_moves:
             return False
         self.board.push(move)
+        self._redo.clear()
         return True
+
+    def undo(self) -> bool:
+        if not self.board.move_stack:
+            return False
+        self._redo.append(self.board.pop())
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo:
+            return False
+        self.board.push(self._redo.pop())
+        return True
+
+    def new_game(self) -> None:
+        self.board = chess.Board()
+        self._redo.clear()
+
+    def restart(self) -> None:
+        # Back to this game's starting position (differs from new_game once custom FEN lands in 3.2).
+        self.board = self.board.root()
+        self._redo.clear()
+
+    def history_text(self) -> str:
+        return self.board.root().variation_san(self.board.move_stack)
+
+    def status(self) -> str:
+        out = self.outcome()
+        if out is None:
+            side = "White" if self.board.turn == chess.WHITE else "Black"
+            return f"{side} to move" + (" - check" if self.board.is_check() else "")
+        if out.termination == chess.Termination.CHECKMATE:
+            return f"Checkmate - {'White' if out.winner == chess.WHITE else 'Black'} wins"
+        return "Draw - " + out.termination.name.replace("_", " ").capitalize()
 
     @property
     def last_move(self) -> chess.Move | None:

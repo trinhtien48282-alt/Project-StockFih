@@ -1,13 +1,12 @@
 import chess
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from stockfih.chess.game import Game
 from stockfih.ui.dialogs import ask_promotion
+from stockfih.ui.themes import PIECE_THEMES, SQUARE_THEMES, PieceTheme, SquareTheme
 
-LIGHT = QColor("#f0d9b5")
-DARK = QColor("#b58863")
 LAST_MOVE = QColor(155, 199, 0, 105)
 SELECTED = QColor(246, 246, 105, 150)
 CHECK = QColor(220, 50, 50, 170)
@@ -15,21 +14,36 @@ TARGET = QColor(20, 85, 30, 120)
 
 
 class BoardWidget(QWidget):
+    changed = Signal()  # emitted whenever the game state changes
+
     def __init__(self, game: Game) -> None:
         super().__init__()
         self.game = game
         self.flipped = False
         self.selected: chess.Square | None = None
         self.targets: list[chess.Square] = []
+        self.square_theme = next(iter(SQUARE_THEMES.values()))
+        self.piece_theme = next(iter(PIECE_THEMES.values()))
         self.setMinimumSize(320, 320)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def sizeHint(self) -> QSize:
         return QSize(640, 640)
 
+    def set_themes(self, squares: SquareTheme, pieces: PieceTheme) -> None:
+        self.square_theme = squares
+        self.piece_theme = pieces
+        self.update()
+
     def flip(self) -> None:
         self.flipped = not self.flipped
         self.update()
+
+    def refresh(self) -> None:
+        # Call after changing the game from outside (undo, redo, new game, restart).
+        self._clear()
+        self.update()
+        self.changed.emit()
 
     def _geometry(self) -> tuple[float, float, float]:
         side = min(self.width(), self.height()) / 8
@@ -70,6 +84,7 @@ class BoardWidget(QWidget):
                     return
             self.game.move(self.selected, sq, promotion)
             self._clear()
+            self.changed.emit()
         else:
             piece = self.game.board.piece_at(sq)
             if piece and piece.color == self.game.board.turn:
@@ -87,7 +102,7 @@ class BoardWidget(QWidget):
         for sq in chess.SQUARES:
             r = self._rect(sq)
             light = (chess.square_file(sq) + chess.square_rank(sq)) % 2 == 1
-            p.fillRect(r, LIGHT if light else DARK)
+            p.fillRect(r, self.square_theme.light if light else self.square_theme.dark)
             if last and sq in (last.from_square, last.to_square):
                 p.fillRect(r, LAST_MOVE)
             if sq == self.selected:
@@ -109,8 +124,9 @@ class BoardWidget(QWidget):
         path.addText(0, 0, font, piece.unicode_symbol(invert_color=True))
         box = path.boundingRect()
         path.translate(r.center().x() - box.center().x(), r.center().y() - box.center().y())
-        p.setPen(QPen(QColor("black"), max(1.0, r.width() * 0.03)))
-        p.setBrush(QColor("white") if piece.color == chess.WHITE else QColor("#1a1a1a"))
+        theme = self.piece_theme
+        p.setPen(QPen(theme.outline, max(1.0, r.width() * 0.03)))
+        p.setBrush(theme.white if piece.color == chess.WHITE else theme.black)
         p.drawPath(path)
 
     def _draw_target(self, p: QPainter, r: QRectF, occupied: bool) -> None:
