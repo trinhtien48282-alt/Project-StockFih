@@ -1,6 +1,6 @@
 # Chess.com Published-Data API (PubAPI). Read-only public data, no login, no key.
 # Docs: https://www.chess.com/news/view/published-data-api
-# Endpoints used here: /player/{username} and /player/{username}/stats.
+# Endpoints used here: /player/{username}, /player/{username}/stats and /leaderboards.
 # This module has no GUI imports. Every response is external data and is validated.
 import json
 import re
@@ -17,6 +17,8 @@ MAX_BYTES = 2_000_000
 _USERNAME = re.compile(r"[A-Za-z0-9_-]{1,25}")
 _COUNTRY = re.compile(r"[A-Z]{2}")
 _ORDER = ("chess_bullet", "chess_blitz", "chess_rapid", "chess_daily")
+# /leaderboards key -> tab label. Order is display order.
+BOARDS = (("live_bullet", "Bullet"), ("live_blitz", "Blitz"), ("live_rapid", "Rapid"))
 
 
 class ChessComError(Exception):
@@ -53,6 +55,19 @@ class RatingLine:
     def label(self) -> str:
         rules, _, time_class = self.key.partition("_")
         return time_class.capitalize() if rules == "chess" else f"{rules.capitalize()} {time_class}"
+
+
+@dataclass(frozen=True)
+class LeaderEntry:
+    rank: int
+    username: str
+    score: int  # the board's rating
+    title: str | None
+    name: str | None
+    country: str | None  # two-letter code
+    wins: int | None
+    losses: int | None
+    draws: int | None
 
 
 def clean_username(value: str) -> str:
@@ -101,6 +116,13 @@ def _str(value: object) -> str | None:
     return value.strip() or None
 
 
+def _country(value: object) -> str | None:
+    # PubAPI sends a URL ending in the two-letter country code.
+    text = _str(value)
+    code = text.rsplit("/", 1)[-1].upper() if text else None
+    return code if code and _COUNTRY.fullmatch(code) else None
+
+
 def fetch_profile(username: str) -> ChessComProfile:
     name = clean_username(username)
     try:
@@ -109,14 +131,12 @@ def fetch_profile(username: str) -> ChessComProfile:
         if error.code == 404:
             raise ChessComError(f'No Chess.com player named "{name}".') from None
         raise
-    country = _str(data.get("country"))  # a URL ending in the country code
-    code = country.rsplit("/", 1)[-1].upper() if country else None
     return ChessComProfile(
         username=_str(data.get("username")) or name,
         title=_str(data.get("title")),
         name=_str(data.get("name")),
         status=_str(data.get("status")),
-        country=code if code and _COUNTRY.fullmatch(code) else None,
+        country=_country(data.get("country")),
         location=_str(data.get("location")),
         joined=_int(data.get("joined")),
         last_online=_int(data.get("last_online")),
@@ -151,3 +171,34 @@ def fetch_ratings(username: str) -> list[RatingLine]:
     lines = [line for key, value in data.items() if (line := _rating_line(str(key), value))]
     lines.sort(key=lambda line: (_ORDER.index(line.key) if line.key in _ORDER else len(_ORDER), line.key))
     return lines
+
+
+def _leader(value: object) -> LeaderEntry | None:
+    if not isinstance(value, dict):
+        return None
+    username, rank, score = _str(value.get("username")), _int(value.get("rank")), _int(value.get("score"))
+    if username is None or rank is None or score is None:
+        return None  # an entry without these cannot be shown honestly
+    return LeaderEntry(
+        rank=rank,
+        username=username,
+        score=score,
+        title=_str(value.get("title")),
+        name=_str(value.get("name")),
+        country=_country(value.get("country")),
+        wins=_int(value.get("win_count")),
+        losses=_int(value.get("loss_count")),
+        draws=_int(value.get("draw_count")),
+    )
+
+
+def fetch_leaderboards() -> dict[str, list[LeaderEntry]]:
+    # One request returns every board (top 50 each). Keys are the BOARDS keys; a missing or
+    # malformed board is an empty list. Sorted by the rank Chess.com sent.
+    data = _get_json("/leaderboards")
+    boards = {}
+    for key, _label in BOARDS:
+        raw = data.get(key)
+        entries = [e for item in raw if (e := _leader(item))] if isinstance(raw, list) else []
+        boards[key] = sorted(entries, key=lambda e: e.rank)
+    return boards
