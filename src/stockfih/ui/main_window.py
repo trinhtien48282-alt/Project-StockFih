@@ -16,6 +16,7 @@ from stockfih.chess.game import Game
 from stockfih.profiles.player import Profile, ProfileStore
 from stockfih.profiles.statistics import compute
 from stockfih.ui.avatar import load_avatar, save_avatar
+from stockfih.ui.chesscom_dialog import ChessComDialog
 from stockfih.ui.chessboard import BoardWidget
 from stockfih.ui.dialogs import (
     ask_fen,
@@ -87,6 +88,9 @@ class MainWindow(QMainWindow):
         profile_menu.addAction("Statistics...").triggered.connect(self._show_stats)
         profile_menu.aboutToShow.connect(self._fill_switch_menu)
         self._fill_switch_menu()
+
+        chesscom_menu = self.menuBar().addMenu("Chess.com")
+        chesscom_menu.addAction("Look up player...").triggered.connect(self._chesscom_lookup)
 
         view = self.menuBar().addMenu("View")
         self._theme_menu(view, "Square theme", "square", SQUARE_THEMES)
@@ -220,6 +224,9 @@ class MainWindow(QMainWindow):
         self.store.add_game(
             self.profile.id, pgn, self.game.result(), info["White"], info["Black"], self._color()
         )
+
+    def _chesscom_lookup(self) -> None:
+        ChessComDialog(self).exec()
 
     # --- per-profile preferences ---
 
