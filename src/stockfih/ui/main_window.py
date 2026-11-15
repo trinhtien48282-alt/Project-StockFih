@@ -19,6 +19,7 @@ from stockfih.ui.avatar import load_avatar, save_avatar
 from stockfih.ui.chesscom_dialog import ChessComDialog
 from stockfih.ui.leaderboard_dialog import LeaderboardDialog
 from stockfih.ui.chessboard import BoardWidget
+from stockfih.ui.games_dialog import ask_chesscom_pgn
 from stockfih.ui.dialogs import (
     ask_fen,
     ask_game_info,
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         chesscom_menu = self.menuBar().addMenu("Chess.com")
         chesscom_menu.addAction("Look up player...").triggered.connect(self._chesscom_lookup)
         chesscom_menu.addAction("Leaderboards...").triggered.connect(self._chesscom_leaderboards)
+        chesscom_menu.addAction("Browse games...").triggered.connect(self._chesscom_games)
 
         view = self.menuBar().addMenu("View")
         self._theme_menu(view, "Square theme", "square", SQUARE_THEMES)
@@ -232,6 +234,17 @@ class MainWindow(QMainWindow):
 
     def _chesscom_leaderboards(self) -> None:
         LeaderboardDialog(self).exec()
+
+    def _chesscom_games(self) -> None:
+        pgn = ask_chesscom_pgn(self)
+        if pgn is None:
+            return
+        try:
+            self.game.load_pgn(pgn)
+        except ValueError as error:
+            QMessageBox.warning(self, "Chess.com games", str(error))
+            return
+        self.board.refresh()
 
     # --- per-profile preferences ---
 
