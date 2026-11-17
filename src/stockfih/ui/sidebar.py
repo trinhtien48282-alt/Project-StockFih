@@ -1,8 +1,16 @@
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
 AVATAR_PX = 48
+
+
+def _bold_font() -> QFont:
+    # A font, not a stylesheet: a stylesheet can override the theme's text color.
+    font = QFont()
+    font.setBold(True)
+    font.setPointSize(font.pointSize() + 2)
+    return font
 
 
 class Sidebar(QWidget):
@@ -13,13 +21,13 @@ class Sidebar(QWidget):
         self.name = QLabel()
         self.name.setTextFormat(Qt.TextFormat.PlainText)
         self.name.setWordWrap(True)
-        self.name.setStyleSheet("font-weight: bold; font-size: 15px;")
+        self.name.setFont(_bold_font())
         head = QHBoxLayout()
         head.addWidget(self.avatar)
         head.addWidget(self.name, 1)
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("font-weight: bold; font-size: 15px;")
+        self.status.setFont(_bold_font())
         self.history = QPlainTextEdit()
         self.history.setReadOnly(True)
         self.history.setFocusPolicy(Qt.FocusPolicy.NoFocus)

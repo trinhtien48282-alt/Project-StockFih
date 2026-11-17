@@ -15,11 +15,13 @@ from PySide6.QtWidgets import (
 from stockfih.chess.game import Game
 from stockfih.profiles.player import Profile, ProfileStore
 from stockfih.profiles.statistics import compute
+from stockfih.ui.app_theme import apply_theme
 from stockfih.ui.avatar import load_avatar, save_avatar
 from stockfih.ui.chesscom_dialog import ChessComDialog
 from stockfih.ui.leaderboard_dialog import LeaderboardDialog
 from stockfih.ui.chessboard import BoardWidget
 from stockfih.ui.games_dialog import ask_chesscom_pgn
+from stockfih.ui.help_dialog import show_shortcuts
 from stockfih.ui.dialogs import (
     ask_fen,
     ask_game_info,
@@ -29,6 +31,7 @@ from stockfih.ui.dialogs import (
     ask_save_pgn,
     show_stats,
 )
+from stockfih.ui.settings_window import ask_settings
 from stockfih.ui.sidebar import Sidebar
 from stockfih.ui.sounds import Sounds
 from stockfih.ui.themes import PIECE_THEMES, SQUARE_THEMES
@@ -48,13 +51,12 @@ class MainWindow(QMainWindow):
             "square": next(iter(SQUARE_THEMES)),
             "piece": next(iter(PIECE_THEMES)),
         }
-        self._theme_actions: dict[str, dict[str, QAction]] = {}
-        self._options: dict[str, tuple[QAction, object, str]] = {}
         self._color_actions: dict[str, QAction] = {}
         self._last_saved: str | None = None  # PGN of the last game written to history
         self.game = Game()
         self.board = BoardWidget(self.game)
         self.sounds = Sounds(self)
+        self.sounds.set_volume(self.settings.value("volume", 60, type=int))
         self.sidebar = Sidebar()
         self.sidebar.setFixedWidth(240)
         self.board.changed.connect(self._refresh)
@@ -97,11 +99,14 @@ class MainWindow(QMainWindow):
         chesscom_menu.addAction("Browse games...").triggered.connect(self._chesscom_games)
 
         view = self.menuBar().addMenu("View")
-        self._theme_menu(view, "Square theme", "square", SQUARE_THEMES)
-        self._theme_menu(view, "Piece theme", "piece", PIECE_THEMES)
-        view.addSeparator()
-        self._option(view, "Animate moves", "animate", self.board, "animate")
-        self._option(view, "Sound", "sound", self.sounds, "enabled")
+        settings_action = view.addAction("Settings...")
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._open_settings)
+
+        help_menu = self.menuBar().addMenu("Help")
+        help_action = help_menu.addAction("Keyboard shortcuts")
+        help_action.setShortcut(QKeySequence("F1"))
+        help_action.triggered.connect(lambda: show_shortcuts(self))
 
         side = QVBoxLayout()
         side.addWidget(self.sidebar, 1)
@@ -246,45 +251,42 @@ class MainWindow(QMainWindow):
             return
         self.board.refresh()
 
-    # --- per-profile preferences ---
+    # --- settings and per-profile preferences ---
 
-    def _theme_menu(self, view, label: str, key: str, themes: dict) -> None:
-        menu = view.addMenu(label)
-        group = QActionGroup(self)
-        self._theme_actions[key] = {}
-        for name in themes:
-            action = QAction(name, self)
-            action.setCheckable(True)
-            action.triggered.connect(lambda _=False, n=name: self._choose(key, n))
-            group.addAction(action)
-            menu.addAction(action)
-            self._theme_actions[key][name] = action
+    def _open_settings(self) -> None:
+        values = {
+            "theme": self.settings.value("theme", "System", type=str),
+            "square": self.choice["square"],
+            "piece": self.choice["piece"],
+            "animate": self.board.animate,
+            "sound": self.sounds.enabled,
+            "volume": self.sounds.volume,
+        }
+        new = ask_settings(self, values)
+        if new is None:
+            return
+        # App-wide settings: stored in QSettings, not per profile.
+        self.settings.setValue("theme", new["theme"])
+        apply_theme(new["theme"])
+        self.settings.setValue("volume", new["volume"])
+        self.sounds.set_volume(new["volume"])
+        # Per-profile settings: stored in the profile database.
+        self._choose("square", new["square"])
+        self._choose("piece", new["piece"])
+        self._flag("animate", self.board, "animate", new["animate"])
+        self._flag("sound", self.sounds, "enabled", new["sound"])
 
-    def _option(self, view, label: str, key: str, target, attr: str) -> None:
-        # A checkable on/off setting: flips target.attr and remembers it in the profile.
-        action = QAction(label, self)
-        action.setCheckable(True)
-
-        def toggled(on: bool) -> None:
-            setattr(target, attr, on)
-            self.store.set_pref(self.profile.id, key, "1" if on else "0")
-
-        action.toggled.connect(toggled)
-        view.addAction(action)
-        self._options[key] = (action, target, attr)
+    def _flag(self, key: str, target, attr: str, on: bool) -> None:
+        setattr(target, attr, on)
+        self.store.set_pref(self.profile.id, key, "1" if on else "0")
 
     def _apply_prefs(self) -> None:
         # Load the active profile's settings. Stored values are external data: unknown -> default.
         for key, themes in (("square", SQUARE_THEMES), ("piece", PIECE_THEMES)):
             name = self.store.pref(self.profile.id, key)
             self.choice[key] = name if name in themes else next(iter(themes))
-            self._theme_actions[key][self.choice[key]].setChecked(True)
-        for key, (action, target, attr) in self._options.items():
-            on = self.store.pref(self.profile.id, key, "1") == "1"
-            setattr(target, attr, on)
-            action.blockSignals(True)  # do not write the value straight back
-            action.setChecked(on)
-            action.blockSignals(False)
+        self.board.animate = self.store.pref(self.profile.id, "animate", "1") == "1"
+        self.sounds.enabled = self.store.pref(self.profile.id, "sound", "1") == "1"
         self._color_actions[self._color()].setChecked(True)
         self._apply_themes()
 

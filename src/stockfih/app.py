@@ -1,5 +1,7 @@
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
+from stockfih.ui.app_theme import apply_theme
 from stockfih.ui.main_window import MainWindow
 
 
@@ -8,6 +10,7 @@ def run() -> int:
     # Names decide the per-user data folder (profiles database, avatars).
     app.setOrganizationName("StockFih")
     app.setApplicationName("StockFih")
+    apply_theme(QSettings().value("theme", "System", type=str))  # before any window exists
     window = MainWindow()
     window.show()
     return app.exec()

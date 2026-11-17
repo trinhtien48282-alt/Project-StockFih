@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -102,7 +103,7 @@ class ChessComDialog(QDialog):
         self.button = QPushButton("Look up")
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
-        self.output.setStyleSheet("font-family: Consolas, 'DejaVu Sans Mono', monospace;")
+        self.output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         row = QHBoxLayout()
         row.addWidget(self.name, 1)
         row.addWidget(self.button)
