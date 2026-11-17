@@ -1,3 +1,4 @@
+import logging
 from PySide6.QtCore import QRunnable, QThreadPool
 from PySide6.QtWidgets import (
     QComboBox,
@@ -33,7 +34,9 @@ class _Job(QRunnable):
             self._send(self.signals.done, self.work())
         except ChessComError as error:
             self._send(self.signals.failed, str(error))
+
         except Exception as error:  # a worker thread must never die silently
+            logging.getLogger(__name__).exception("Chess.com request failed")
             self._send(self.signals.failed, f"Unexpected error: {error}")
 
     def _send(self, signal, value) -> None:

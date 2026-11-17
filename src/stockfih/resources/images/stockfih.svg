@@ -1,0 +1,45 @@
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 400 400"
+     width="400" height="400">
+
+  <defs>
+    <linearGradient id="fishGradient"
+                    x1="0%" y1="0%"
+                    x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#69D4FF"/>
+      <stop offset="50%" stop-color="#168BDB"/>
+      <stop offset="100%" stop-color="#064A91"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(45 200 200)">
+
+    <!-- Fish body -->
+    <path
+      d="
+        M 200 65
+        C 250 105, 280 155, 280 205
+        C 280 260, 245 310, 200 335
+        C 155 310, 120 260, 120 205
+        C 120 155, 150 105, 200 65
+        Z
+      "
+      fill="url(#fishGradient)"
+    />
+
+    <!-- Tail -->
+    <path
+      d="
+        M 200 335
+        C 175 355, 145 385, 125 395
+        C 155 350, 165 335, 200 335
+        C 235 335, 245 350, 275 395
+        C 255 385, 225 355, 200 335
+        Z
+      "
+      fill="url(#fishGradient)"
+    />
+
+  </g>
+</svg>

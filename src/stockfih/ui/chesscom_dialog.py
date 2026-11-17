@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
@@ -41,7 +42,9 @@ class _Lookup(QRunnable):
             except ChessComError as error:
                 ratings, note = None, f"Ratings unavailable: {error}"
             self._send(self.signals.done, (profile, ratings, note))
+
         except Exception as error:  # a worker thread must never die silently
+            logging.getLogger(__name__).exception("Chess.com request failed")
             self._send(self.signals.failed, f"Unexpected error: {error}")
 
     def _send(self, signal, value) -> None:

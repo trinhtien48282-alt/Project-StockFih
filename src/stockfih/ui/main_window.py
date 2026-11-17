@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
+from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         help_action = help_menu.addAction("Keyboard shortcuts")
         help_action.setShortcut(QKeySequence("F1"))
         help_action.triggered.connect(lambda: show_shortcuts(self))
+        help_menu.addAction("Open log folder").triggered.connect(self._open_logs)
 
         side = QVBoxLayout()
         side.addWidget(self.sidebar, 1)
@@ -250,6 +253,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Chess.com games", str(error))
             return
         self.board.refresh()
+
+    def _open_logs(self) -> None:
+        folder = self.data_dir / "logs"
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     # --- settings and per-profile preferences ---
 
