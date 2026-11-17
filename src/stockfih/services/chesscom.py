@@ -5,7 +5,9 @@
 # This module has no GUI imports. Every response is external data and is validated.
 import json
 import re
+import zlib
 from dataclasses import dataclass
+from http.client import HTTPException
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -106,14 +108,24 @@ def _http_message(code: int) -> str:
 
 
 def _get_json(path: str, limit: int = MAX_BYTES) -> dict:
-    request = Request(BASE + path, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    # Asks for gzip: a busy month of games is tens of MB as plain JSON, a fraction of that gzipped.
+    request = Request(
+        BASE + path,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json", "Accept-Encoding": "gzip"},
+    )
     try:
         with urlopen(request, timeout=TIMEOUT) as response:
             raw = response.read(limit + 1)
     except HTTPError as error:
         raise ChessComError(_http_message(error.code), error.code) from None
-    except OSError:  # no network, DNS failure, timeout
+    except (OSError, HTTPException):  # no network, DNS failure, timeout, connection cut mid-reply
         raise ChessComError("Could not reach Chess.com. Check your internet connection.") from None
+    if raw[:2] == b"\x1f\x8b":  # gzip magic number; urllib does not unpack it for us
+        try:
+            # max_length stops a zip bomb at limit + 1 bytes.
+            raw = zlib.decompressobj(31).decompress(raw, limit + 1)
+        except zlib.error:
+            raise ChessComError("Chess.com sent data this app could not read.") from None
     if len(raw) > limit:
         raise ChessComError("That Chess.com response is too large to load.")
     try:

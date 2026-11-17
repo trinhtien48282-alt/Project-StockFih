@@ -15,6 +15,10 @@ from stockfih.services import chesscom
 from stockfih.services.chesscom import ArchiveGame, ChessComError
 from stockfih.ui.chesscom_dialog import _date, _Signals
 
+# shortcut: keeps the last few months in memory so revisiting one is instant. A busy month
+# can be many MB, hence the small cap. Upgrade to a disk cache if people ask for it.
+CACHE_MONTHS = 6
+
 
 class _Job(QRunnable):
     # Runs one request on a pool thread so the window never freezes. Requests are made one
@@ -59,6 +63,8 @@ class GamesDialog(QDialog):
         self.pgn: str | None = None  # set when the user opens a game
         self._games: list[ArchiveGame] = []
         self._name = ""
+        self._key: tuple[str, int, int] | None = None  # month being loaded
+        self._cache: dict[tuple[str, int, int], list[ArchiveGame]] = {}
         self._working = False
         self.setWindowTitle("Chess.com public games")
         self.resize(600, 480)
@@ -108,8 +114,8 @@ class GamesDialog(QDialog):
         self._working = True
         self._sync()
         signals = _Signals(self)
-        signals.done.connect(done)
-        signals.failed.connect(self._fail)
+        signals.done.connect(done)  # must be a bound method of this dialog, not a lambda:
+        signals.failed.connect(self._fail)  # that keeps the slot on the GUI thread
         QThreadPool.globalInstance().start(_Job(work, signals))
 
     def _fail(self, message: str) -> None:
@@ -148,12 +154,23 @@ class GamesDialog(QDialog):
         name = self._name
         self.games.clear()
         self._games = []
-        self._run(lambda: chesscom.fetch_month(name, year, month), self._got_games, f"Loading {year}-{month:02d}...")
+        self._key = (name, year, month)
+        if self._key in self._cache:
+            self._got_games(self._cache[self._key])
+            return
+        self._run(
+            lambda: chesscom.fetch_month(name, year, month),
+            self._got_games,
+            f"Loading {year}-{month:02d}... (big months can take a while)",
+        )
 
     def _got_games(self, games: list) -> None:
         self._games = games
-        for game in games:
-            self.games.addItem(describe(game))  # plain text: names are external data
+        if self._key is not None:
+            if self._key not in self._cache and len(self._cache) >= CACHE_MONTHS:
+                del self._cache[next(iter(self._cache))]  # oldest first
+            self._cache[self._key] = games
+        self.games.addItems([describe(game) for game in games])  # plain text: names are external data
         self.status.setText(f"{len(games)} game(s)." if games else "No standard chess games this month.")
         self._working = False
         self._sync()
