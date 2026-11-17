@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.spec
 
 # Virtual environments
 .venv/
@@ -19,3 +20,4 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
