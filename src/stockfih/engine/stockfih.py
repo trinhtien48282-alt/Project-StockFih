@@ -3,6 +3,7 @@ import random
 import chess
 
 from stockfih.engine.center import center_control
+from stockfih.engine.development import development
 from stockfih.engine.king_safety import king_safety
 from stockfih.engine.mobility import mobility
 from stockfih.engine.pawn_structure import pawn_structure
@@ -20,6 +21,7 @@ VALUES = {
 MATE = 100_000  # bigger than any material total, so a mate always beats winning material
 INF = 10**9
 DEFAULT_DEPTH = 3  # plies. Python is slow: 4+ can take many seconds in busy positions.
+QUIESCENCE_PLIES = 6  # most capture plies searched past the horizon. Bounds the worst case.
 
 
 def material(board: chess.Board) -> int:
@@ -44,6 +46,7 @@ def evaluate(board: chess.Board) -> int:
         + king_safety(board)
         + pawn_structure(board)
         + center_control(board)
+        + development(board)
     )
     return score if board.turn == chess.WHITE else -score
 
@@ -72,13 +75,34 @@ def _ordered(board: chess.Board, moves: list[chess.Move]) -> list[chess.Move]:
     return sorted(moves, key=lambda m: _order_key(board, m), reverse=True)
 
 
+def quiescence(board: chess.Board, alpha: int, beta: int, ply: int, qply: int = 0) -> int:
+    # Past the horizon, keep playing captures until the position is quiet, so a capture that
+    # is simply recaptured is not scored as a free win. The side to move may also "stand pat":
+    # decline every capture and take the static score.
+    # shortcut: captures only (no promotions, no check evasions), so a side in check still
+    # stands pat. Pushes and pops moves on `board`, so it ends up unchanged.
+    stand = _leaf(board, ply)
+    if qply >= QUIESCENCE_PLIES or stand >= beta:
+        return stand
+    best = stand
+    alpha = max(alpha, stand)
+    for move in _ordered(board, list(board.generate_legal_captures())):
+        board.push(move)
+        score = -quiescence(board, -beta, -alpha, ply + 1, qply + 1)
+        board.pop()
+        best = max(best, score)
+        alpha = max(alpha, best)
+        if alpha >= beta:
+            break
+    return best
+
+
 def negamax(board: chess.Board, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
-    # Alpha-beta negamax. Score for the side to move, searching `depth` more plies.
-    # Pushes and pops moves on `board`, so it ends up unchanged.
-    # shortcut: no repetition or 50-move draws inside the search, and no quiescence, so it
-    # can misjudge captures at the horizon. 8.1 adds quiescence.
+    # Alpha-beta negamax. Score for the side to move, searching `depth` more plies, then
+    # quiescence. Pushes and pops moves on `board`, so it ends up unchanged.
+    # shortcut: no repetition or 50-move draws inside the search.
     if depth == 0:
-        return _leaf(board, ply)
+        return quiescence(board, alpha, beta, ply)
     moves = list(board.legal_moves)
     if not moves:
         return _leaf(board, ply)  # checkmate or stalemate

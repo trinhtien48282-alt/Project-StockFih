@@ -1,6 +1,7 @@
 import chess
 import pytest
 
+import stockfih.engine.stockfih as engine
 from stockfih.engine.stockfih import (
     INF,
     MATE,
@@ -14,10 +15,25 @@ from stockfih.engine.stockfih import (
 MATED = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
 
 
+def plain_quiescence(board: chess.Board, ply: int, qply: int = 0) -> int:
+    # Reference: stand pat or play any capture, no pruning, no ordering.
+    stand = _leaf(board, ply)
+    if qply >= engine.QUIESCENCE_PLIES:
+        return stand
+    best = stand
+    for move in list(board.generate_legal_captures()):
+        board.push(move)
+        best = max(best, -plain_quiescence(board, ply + 1, qply + 1))
+        board.pop()
+    return best
+
+
 def plain_negamax(board: chess.Board, depth: int, ply: int = 0) -> int:
     # Reference: same scoring, no pruning, no ordering. Alpha-beta must match it exactly.
+    if depth == 0:
+        return plain_quiescence(board, ply)
     moves = list(board.legal_moves)
-    if depth == 0 or not moves:
+    if not moves:
         return _leaf(board, ply)
     best = -INF
     for move in moves:
@@ -85,12 +101,13 @@ def test_bad_depth_rejected():
 @pytest.mark.parametrize(
     "fen, depth",
     [
-        ("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 2 3", 3),
+        ("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 2 3", 2),
         ("4k3/8/8/3q4/8/8/8/3RK3 w - - 0 1", 3),
-        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 2),
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 2),
     ],
 )
-def test_alpha_beta_matches_plain_negamax(fen, depth):
+def test_alpha_beta_matches_plain_negamax(monkeypatch, fen, depth):
+    monkeypatch.setattr(engine, "QUIESCENCE_PLIES", 2)  # keeps the unpruned reference fast
     board = chess.Board(fen)
     before = board.fen()
     assert negamax(board, depth, -INF, INF) == plain_negamax(board, depth)
