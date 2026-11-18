@@ -2,6 +2,8 @@ import random
 
 import chess
 
+from stockfih.engine.king_safety import king_safety
+from stockfih.engine.mobility import mobility
 from stockfih.engine.pst import positional
 
 # Centipawns. The king has no material value: it can never be captured, mate is scored separately.
@@ -33,7 +35,7 @@ def evaluate(board: chess.Board) -> int:
         if out.winner is None:
             return 0  # stalemate, insufficient material, 75-move, fivefold
         return MATE if out.winner == board.turn else -MATE
-    score = material(board) + positional(board)
+    score = material(board) + positional(board) + mobility(board) + king_safety(board)
     return score if board.turn == chess.WHITE else -score
 
 
