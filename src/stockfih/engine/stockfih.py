@@ -1,4 +1,5 @@
 import random
+import time
 
 import chess
 import chess.polyglot
@@ -9,6 +10,7 @@ from stockfih.engine.king_safety import king_safety
 from stockfih.engine.mobility import mobility
 from stockfih.engine.pawn_structure import pawn_structure
 from stockfih.engine.pst import positional
+from stockfih.engine.stats import SearchStats, SearchTimeout
 
 # Centipawns. The king has no material value: it can never be captured, mate is scored separately.
 VALUES = {
@@ -79,12 +81,22 @@ def _ordered(board: chess.Board, moves: list[chess.Move]) -> list[chess.Move]:
     return sorted(moves, key=lambda m: _order_key(board, m), reverse=True)
 
 
-def quiescence(board: chess.Board, alpha: int, beta: int, ply: int, qply: int = 0) -> int:
+def quiescence(
+    board: chess.Board,
+    alpha: int,
+    beta: int,
+    ply: int,
+    qply: int = 0,
+    stats: SearchStats | None = None,
+) -> int:
     # Past the horizon, keep playing captures until the position is quiet, so a capture that
     # is simply recaptured is not scored as a free win. The side to move may also "stand pat":
     # decline every capture and take the static score.
     # shortcut: captures only (no promotions, no check evasions), so a side in check still
-    # stands pat. Pushes and pops moves on `board`, so it ends up unchanged.
+    # stands pat. Pushes and pops moves on `board`, so it ends up unchanged
+    # (except when `stats` raises SearchTimeout: then the board is left mid-line, discard it).
+    if stats is not None:
+        stats.tick()
     stand = _leaf(board, ply)
     if qply >= QUIESCENCE_PLIES or stand >= beta:
         return stand
@@ -92,7 +104,7 @@ def quiescence(board: chess.Board, alpha: int, beta: int, ply: int, qply: int = 
     alpha = max(alpha, stand)
     for move in _ordered(board, list(board.generate_legal_captures())):
         board.push(move)
-        score = -quiescence(board, -beta, -alpha, ply + 1, qply + 1)
+        score = -quiescence(board, -beta, -alpha, ply + 1, qply + 1, stats)
         board.pop()
         best = max(best, score)
         alpha = max(alpha, best)
@@ -126,14 +138,20 @@ def negamax(
     beta: int,
     ply: int = 0,
     tt: dict | None = None,
+    stats: SearchStats | None = None,
 ) -> int:
     # Alpha-beta negamax. Score for the side to move, searching `depth` more plies, then
     # quiescence. Pushes and pops moves on `board`, so it ends up unchanged.
     # `tt` is an optional transposition table: position hash -> (depth, kind, score, best move).
     # It skips positions already searched at least this deep and tries its best move first.
+    # `stats` is optional: it counts nodes and raises SearchTimeout at its deadline. A node cut
+    # off by the timeout writes nothing to `tt`, so the table only ever holds finished searches.
+    # On SearchTimeout the board is left mid-line: the caller must discard it.
     # shortcut: no repetition or 50-move draws inside the search (so the table is safe to share).
     if depth == 0:
-        return quiescence(board, alpha, beta, ply)
+        return quiescence(board, alpha, beta, ply, 0, stats)
+    if stats is not None:
+        stats.tick()
     alpha0 = alpha
     key = None
     tt_move = None
@@ -163,7 +181,7 @@ def negamax(
     best_move = None
     for move in ordered:
         board.push(move)
-        score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, tt)
+        score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, tt, stats)
         board.pop()
         if score > best:
             best, best_move = score, move
@@ -179,11 +197,20 @@ def negamax(
 
 
 class StockFihEngine:
-    def __init__(self, depth: int = DEFAULT_DEPTH, seed: int | None = None) -> None:
+    def __init__(
+        self, depth: int = DEFAULT_DEPTH, seed: int | None = None, time_limit: float | None = None
+    ) -> None:
         if depth < 1:
             raise ValueError("Search depth must be at least 1.")
+        if time_limit is not None and time_limit <= 0:
+            raise ValueError("Time limit must be positive.")
         self.depth = depth  # plies, can be changed between moves
+        # Seconds per move, or None for no limit. Can be changed between moves. Depth stays a
+        # cap too: the search stops at whichever comes first. Depth 1 always finishes, so the
+        # engine always has a move; the limit stops the deeper passes.
+        self.time_limit = time_limit
         self.reached_depth = 0  # last depth fully searched by choose_move
+        self.stats = SearchStats()  # numbers of the last choose_move
         self.table: dict = {}  # transposition table, kept between moves (see negamax)
         self._rng = random.Random(seed)  # a seed makes tie-breaks repeatable (tests)
 
@@ -192,6 +219,7 @@ class StockFihEngine:
     ) -> tuple[dict[chess.Move, int], list[chess.Move]]:
         # Scores every root move. Returns (score per move, the moves tied for best).
         # Scores of moves that lose to the best are only upper bounds, which is enough to rank them.
+        # Raises SearchTimeout when self.stats runs out of time; `work` is then mid-line.
         best_score = -INF
         best: list[chess.Move] = []
         scores: dict[chess.Move, int] = {}
@@ -199,7 +227,7 @@ class StockFihEngine:
             work.push(move)
             # Window starts one below the best score so equal moves still return an exact
             # score (needed for random tie-breaks); worse moves fail low and are cut early.
-            score = -negamax(work, depth - 1, -INF, -(best_score - 1), 1, self.table)
+            score = -negamax(work, depth - 1, -INF, -(best_score - 1), 1, self.table, self.stats)
             work.pop()
             scores[move] = score
             if score > best_score:
@@ -217,12 +245,28 @@ class StockFihEngine:
             self.table.clear()
         moves = _ordered(work, moves)
         best: list[chess.Move] = []
+        start = time.perf_counter()
+        end = None if self.time_limit is None else start + self.time_limit
+        self.stats = stats = SearchStats()
         # Iterative deepening: search 1 ply, then 2, ... up to self.depth. Each pass starts
         # with the moves the previous pass liked best, so alpha-beta cuts more.
+        # shortcut: a pass cut off by the time limit is thrown away whole, even if it had
+        # already found a better move. Upgrade if the lost time matters.
         for depth in range(1, self.depth + 1):
-            scores, best = self._search_root(work, moves, depth)
+            if depth > 1 and end is not None:  # depth 1 is never limited: a move must exist
+                if time.perf_counter() >= end:
+                    stats.timed_out = True
+                    break
+                stats.deadline = end
+            try:
+                scores, found = self._search_root(work, moves, depth)
+            except SearchTimeout:
+                stats.timed_out = True
+                break
+            best = found
             self.reached_depth = depth
             if scores[best[0]] >= MATE_BOUND:
                 break  # forced mate found; the shallowest pass finds the quickest one
             moves = sorted(moves, key=lambda m: scores[m], reverse=True)  # stable
+        stats.seconds = time.perf_counter() - start
         return self._rng.choice(best)  # equal moves: pick one at random so games vary
