@@ -1,6 +1,7 @@
 import random
 
 import chess
+import chess.polyglot
 
 from stockfih.engine.center import center_control
 from stockfih.engine.development import development
@@ -22,6 +23,9 @@ MATE = 100_000  # bigger than any material total, so a mate always beats winning
 INF = 10**9
 DEFAULT_DEPTH = 3  # plies. Python is slow: 4+ can take many seconds in busy positions.
 QUIESCENCE_PLIES = 6  # most capture plies searched past the horizon. Bounds the worst case.
+TT_MAX = 200_000  # transposition table entries kept before it is emptied (about 30 MB)
+MATE_BOUND = MATE - 1000  # scores beyond this are "mate in N", not material
+EXACT, LOWER, UPPER = 0, 1, 2  # what a table score means: the value, or a bound on it
 
 
 def material(board: chess.Board) -> int:
@@ -97,24 +101,80 @@ def quiescence(board: chess.Board, alpha: int, beta: int, ply: int, qply: int = 
     return best
 
 
-def negamax(board: chess.Board, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
+def _to_table(score: int, ply: int) -> int:
+    # Mate scores count plies from the root. The table must not, because the same position
+    # can be reached at a different ply, so store the distance from this node instead.
+    if score >= MATE_BOUND:
+        return score + ply
+    if score <= -MATE_BOUND:
+        return score - ply
+    return score
+
+
+def _from_table(score: int, ply: int) -> int:
+    if score >= MATE_BOUND:
+        return score - ply
+    if score <= -MATE_BOUND:
+        return score + ply
+    return score
+
+
+def negamax(
+    board: chess.Board,
+    depth: int,
+    alpha: int,
+    beta: int,
+    ply: int = 0,
+    tt: dict | None = None,
+) -> int:
     # Alpha-beta negamax. Score for the side to move, searching `depth` more plies, then
     # quiescence. Pushes and pops moves on `board`, so it ends up unchanged.
-    # shortcut: no repetition or 50-move draws inside the search.
+    # `tt` is an optional transposition table: position hash -> (depth, kind, score, best move).
+    # It skips positions already searched at least this deep and tries its best move first.
+    # shortcut: no repetition or 50-move draws inside the search (so the table is safe to share).
     if depth == 0:
         return quiescence(board, alpha, beta, ply)
+    alpha0 = alpha
+    key = None
+    tt_move = None
+    if tt is not None:
+        key = chess.polyglot.zobrist_hash(board)  # standard Zobrist hash from python-chess
+        entry = tt.get(key)
+        if entry is not None:
+            entry_depth, kind, entry_score, tt_move = entry
+            if entry_depth >= depth:
+                entry_score = _from_table(entry_score, ply)
+                if kind == EXACT:
+                    return entry_score
+                if kind == LOWER:
+                    alpha = max(alpha, entry_score)
+                else:
+                    beta = min(beta, entry_score)
+                if alpha >= beta:
+                    return entry_score
     moves = list(board.legal_moves)
     if not moves:
         return _leaf(board, ply)  # checkmate or stalemate
+    ordered = _ordered(board, moves)
+    if tt_move in ordered:  # stored move first (it can be stale after a hash collision)
+        ordered.remove(tt_move)
+        ordered.insert(0, tt_move)
     best = -INF
-    for move in _ordered(board, moves):
+    best_move = None
+    for move in ordered:
         board.push(move)
-        score = -negamax(board, depth - 1, -beta, -alpha, ply + 1)
+        score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, tt)
         board.pop()
-        best = max(best, score)
+        if score > best:
+            best, best_move = score, move
         alpha = max(alpha, best)
         if alpha >= beta:
             break
+    if tt is not None:
+        kind = UPPER if best <= alpha0 else LOWER if best >= beta else EXACT
+        old = tt.get(key)
+        if old is None or depth >= old[0]:
+            tt[key] = (depth, kind, _to_table(best, ply), tt_move if kind == UPPER else best_move)
     return best
 
 
@@ -123,23 +183,46 @@ class StockFihEngine:
         if depth < 1:
             raise ValueError("Search depth must be at least 1.")
         self.depth = depth  # plies, can be changed between moves
+        self.reached_depth = 0  # last depth fully searched by choose_move
+        self.table: dict = {}  # transposition table, kept between moves (see negamax)
         self._rng = random.Random(seed)  # a seed makes tie-breaks repeatable (tests)
+
+    def _search_root(
+        self, work: chess.Board, moves: list[chess.Move], depth: int
+    ) -> tuple[dict[chess.Move, int], list[chess.Move]]:
+        # Scores every root move. Returns (score per move, the moves tied for best).
+        # Scores of moves that lose to the best are only upper bounds, which is enough to rank them.
+        best_score = -INF
+        best: list[chess.Move] = []
+        scores: dict[chess.Move, int] = {}
+        for move in moves:
+            work.push(move)
+            # Window starts one below the best score so equal moves still return an exact
+            # score (needed for random tie-breaks); worse moves fail low and are cut early.
+            score = -negamax(work, depth - 1, -INF, -(best_score - 1), 1, self.table)
+            work.pop()
+            scores[move] = score
+            if score > best_score:
+                best_score, best = score, [move]
+            elif score == best_score:
+                best.append(move)
+        return scores, best
 
     def choose_move(self, board: chess.Board) -> chess.Move:
         moves = list(board.legal_moves)
         if not moves:
             raise ValueError("No legal moves: the game is over.")
         work = board.copy()  # never touch the caller's board
-        best_score = -INF
+        if len(self.table) > TT_MAX:
+            self.table.clear()
+        moves = _ordered(work, moves)
         best: list[chess.Move] = []
-        for move in _ordered(work, moves):
-            work.push(move)
-            # Window starts one below the best score so equal moves still return an exact
-            # score (needed for random tie-breaks); worse moves fail low and are cut early.
-            score = -negamax(work, self.depth - 1, -INF, -(best_score - 1), 1)
-            work.pop()
-            if score > best_score:
-                best_score, best = score, [move]
-            elif score == best_score:
-                best.append(move)
+        # Iterative deepening: search 1 ply, then 2, ... up to self.depth. Each pass starts
+        # with the moves the previous pass liked best, so alpha-beta cuts more.
+        for depth in range(1, self.depth + 1):
+            scores, best = self._search_root(work, moves, depth)
+            self.reached_depth = depth
+            if scores[best[0]] >= MATE_BOUND:
+                break  # forced mate found; the shallowest pass finds the quickest one
+            moves = sorted(moves, key=lambda m: scores[m], reverse=True)  # stable
         return self._rng.choice(best)  # equal moves: pick one at random so games vary
