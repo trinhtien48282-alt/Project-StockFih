@@ -17,11 +17,13 @@ class OpeningBook:
         # A book move for this position, chosen at random by book weight, or None when the
         # position is not in the book or the file cannot be read. Only legal moves are
         # returned: the file is external data and a hash collision can give a wrong entry.
+        # minimum_weight=0: python-chess skips weight-0 entries by default. Some books use 0 for
+        # "playable but unranked"; if every entry is 0 we pick uniformly (see below).
         # shortcut: the file is opened on every lookup (simple, no lock held on Windows).
         # Upgrade to one open reader if lookups ever show up in a profile.
         try:
             with chess.polyglot.open_reader(self.path) as reader:
-                entries = [e for e in reader.find_all(board) if e.move in board.legal_moves]
+                entries = [e for e in reader.find_all(board, minimum_weight=0) if e.move in board.legal_moves]
         except (OSError, ValueError):  # unreadable or empty file
             return None
         if not entries:
