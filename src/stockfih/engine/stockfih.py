@@ -4,6 +4,7 @@ import time
 import chess
 import chess.polyglot
 
+from stockfih.engine.book import OpeningBook
 from stockfih.engine.center import center_control
 from stockfih.engine.development import development
 from stockfih.engine.king_safety import king_safety
@@ -28,6 +29,13 @@ QUIESCENCE_PLIES = 6  # most capture plies searched past the horizon. Bounds the
 TT_MAX = 200_000  # transposition table entries kept before it is emptied (about 30 MB)
 MATE_BOUND = MATE - 1000  # scores beyond this are "mate in N", not material
 EXACT, LOWER, UPPER = 0, 1, 2  # what a table score means: the value, or a bound on it
+# Difficulty presets: search settings only, not rating claims. Measure real strength in 8.3.
+DIFFICULTIES = {
+    "Easy": {"depth": 1, "time_limit": None, "node_limit": None},
+    "Normal": {"depth": 2, "time_limit": None, "node_limit": None},
+    "Hard": {"depth": 3, "time_limit": None, "node_limit": None},
+    "Insane": {"depth": 20, "time_limit": 5.0, "node_limit": None},
+}
 
 
 def material(board: chess.Board) -> int:
@@ -198,21 +206,45 @@ def negamax(
 
 class StockFihEngine:
     def __init__(
-        self, depth: int = DEFAULT_DEPTH, seed: int | None = None, time_limit: float | None = None
+        self,
+        depth: int = DEFAULT_DEPTH,
+        seed: int | None = None,
+        time_limit: float | None = None,
+        node_limit: int | None = None,
+        book: OpeningBook | None = None,
     ) -> None:
         if depth < 1:
             raise ValueError("Search depth must be at least 1.")
         if time_limit is not None and time_limit <= 0:
             raise ValueError("Time limit must be positive.")
+        if node_limit is not None and node_limit <= 0:
+            raise ValueError("Node limit must be positive.")
         self.depth = depth  # plies, can be changed between moves
         # Seconds per move, or None for no limit. Can be changed between moves. Depth stays a
-        # cap too: the search stops at whichever comes first. Depth 1 always finishes, so the
+        # cap too: the search stops at whichever comes first (depth, time, nodes). Depth 1 always finishes, so the
         # engine always has a move; the limit stops the deeper passes.
         self.time_limit = time_limit
+        # Most nodes per move (all passes together), or None. Same rules as time_limit: depth 1
+        # always finishes, deeper passes stop at the limit. Unlike time it is repeatable.
+        self.node_limit = node_limit
+        # Opening book, or None. Consulted first; no entry for the position means a normal search.
+        self.book = book
+        self.from_book = False  # True when the last choose_move played a book move
         self.reached_depth = 0  # last depth fully searched by choose_move
         self.stats = SearchStats()  # numbers of the last choose_move
         self.table: dict = {}  # transposition table, kept between moves (see negamax)
         self._rng = random.Random(seed)  # a seed makes tie-breaks repeatable (tests)
+
+    def set_difficulty(self, name: str) -> None:
+        # Applies a DIFFICULTIES preset. ValueError for an unknown name; nothing changes then.
+        if name not in DIFFICULTIES:
+            raise ValueError(f"Unknown difficulty: {name}.")
+        preset = DIFFICULTIES[name]
+        self.depth, self.time_limit, self.node_limit = (
+            preset["depth"],
+            preset["time_limit"],
+            preset["node_limit"],
+        )
 
     def _search_root(
         self, work: chess.Board, moves: list[chess.Move], depth: int
@@ -240,6 +272,14 @@ class StockFihEngine:
         moves = list(board.legal_moves)
         if not moves:
             raise ValueError("No legal moves: the game is over.")
+        self.from_book = False
+        if self.book is not None:
+            move = self.book.pick(board, self._rng)
+            if move is not None:
+                self.stats = SearchStats()  # nothing was searched
+                self.reached_depth = 0
+                self.from_book = True
+                return move
         work = board.copy()  # never touch the caller's board
         if len(self.table) > TT_MAX:
             self.table.clear()
@@ -253,11 +293,14 @@ class StockFihEngine:
         # shortcut: a pass cut off by the time limit is thrown away whole, even if it had
         # already found a better move. Upgrade if the lost time matters.
         for depth in range(1, self.depth + 1):
-            if depth > 1 and end is not None:  # depth 1 is never limited: a move must exist
-                if time.perf_counter() >= end:
+            if depth > 1:  # depth 1 is never limited: a move must exist
+                if (end is not None and time.perf_counter() >= end) or (
+                    self.node_limit is not None and stats.nodes >= self.node_limit
+                ):
                     stats.timed_out = True
                     break
                 stats.deadline = end
+                stats.node_limit = self.node_limit
             try:
                 scores, found = self._search_root(work, moves, depth)
             except SearchTimeout:

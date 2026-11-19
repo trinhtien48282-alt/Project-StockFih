@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 
 class SearchTimeout(Exception):
-    # Raised inside the search when the time limit is up. choose_move catches it.
+    # Raised inside the search when the time or node limit is up. choose_move catches it.
     pass
 
 
@@ -17,8 +17,9 @@ class SearchStats:
     # A pass cut off by the time limit still counts its nodes.
     nodes: int = 0
     seconds: float = 0.0  # wall time of the whole choose_move
-    timed_out: bool = False  # True when the time limit stopped a deeper pass
+    timed_out: bool = False  # True when the time or node limit stopped a deeper pass
     deadline: float | None = None  # time.perf_counter() value to stop at; None = no limit
+    node_limit: int | None = None  # stop when `nodes` reaches this; None = no limit
 
     @property
     def nps(self) -> float | None:
@@ -27,6 +28,8 @@ class SearchStats:
 
     def tick(self) -> None:
         self.nodes += 1
+        if self.node_limit is not None and self.nodes >= self.node_limit:
+            raise SearchTimeout
         if (
             self.deadline is not None
             and self.nodes % CHECK_EVERY == 0
