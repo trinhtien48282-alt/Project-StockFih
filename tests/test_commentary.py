@@ -56,9 +56,15 @@ def test_real_checkmate_gets_a_finished_line():
         assert line and "{" not in line and "}" not in line
 
 
+class _First:
+    # Stand-in rng: always the first usable line, so the test is repeatable.
+    def choice(self, seq):
+        return seq[0]
+
+
 def test_professional_blunder_uses_the_measured_loss():
     event = judgement_event(chess.Board(), chess.Move.from_uci("e2e4"), "player", 0, -250)
-    assert Commentator("professional").comment([event]) == (
+    assert Commentator("professional", rng=_First()).comment([event]) == (
         "e4 is a blunder by the engine's evaluation, about 250 centipawns."
     )
 
