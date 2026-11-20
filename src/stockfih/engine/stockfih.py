@@ -231,6 +231,9 @@ class StockFihEngine:
         self.book = book
         self.from_book = False  # True when the last choose_move played a book move
         self.reached_depth = 0  # last depth fully searched by choose_move
+        # Score of the move last chosen, centipawns for the side that moved (a forced mate is
+        # beyond MATE_BOUND). None before the first search and after a book move (not searched).
+        self.score: int | None = None
         self.stats = SearchStats()  # numbers of the last choose_move
         self.table: dict = {}  # transposition table, kept between moves (see negamax)
         self._rng = random.Random(seed)  # a seed makes tie-breaks repeatable (tests)
@@ -273,6 +276,7 @@ class StockFihEngine:
         if not moves:
             raise ValueError("No legal moves: the game is over.")
         self.from_book = False
+        self.score = None
         if self.book is not None:
             move = self.book.pick(board, self._rng)
             if move is not None:
@@ -308,6 +312,7 @@ class StockFihEngine:
                 break
             best = found
             self.reached_depth = depth
+            self.score = scores[best[0]]
             if scores[best[0]] >= MATE_BOUND:
                 break  # forced mate found; the shallowest pass finds the quickest one
             moves = sorted(moves, key=lambda m: scores[m], reverse=True)  # stable

@@ -5,8 +5,9 @@ import chess
 
 # Structured facts about a move, for the commentary system (Phase 9). This module only reads
 # the board: it has no engine, GUI or dialogue imports, and it never picks a move.
-# Only facts python-chess can prove live here. Judgements like "blunder" or "brilliant" need
-# an evaluation and come in a later step; nothing here may claim them.
+# events_for_move reports only facts python-chess can prove. The judgement kinds (INACCURACY,
+# MISTAKE, BLUNDER, MISSED_WIN) are never made here: judgement.py makes them from numbers that
+# a caller measured with an engine.
 
 BY = ("player", "stockfih")
 
@@ -20,6 +21,11 @@ class EventKind(Enum):
     CHECKMATE = "checkmate"
     STALEMATE = "stalemate"
     DRAW = "draw"  # any other draw; `reason` says which
+    # Judgements, made by judgement.py from engine scores (never by events_for_move):
+    INACCURACY = "inaccuracy"
+    MISTAKE = "mistake"
+    BLUNDER = "blunder"
+    MISSED_WIN = "missed_win"
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,7 @@ class GameEvent:
     captured: chess.PieceType | None = None  # CAPTURE only
     winner: chess.Color | None = None  # CHECKMATE only
     reason: str = ""  # DRAW only, e.g. "insufficient_material"
+    loss: int | None = None  # judgements only: centipawns lost, None when a mate score was involved
 
 
 def _outcome(board: chess.Board) -> chess.Outcome | None:
@@ -46,15 +53,20 @@ def _outcome(board: chess.Board) -> chess.Outcome | None:
     return None
 
 
+def check_move(board: chess.Board, move: chess.Move, by: str) -> None:
+    # Raises ValueError for an unknown `by` or a move that is not legal in `board`.
+    if by not in BY:
+        raise ValueError(f"by must be one of {BY}.")
+    if move not in board.legal_moves:
+        raise ValueError(f"Illegal move {move.uci()} in {board.fen()}")
+
+
 def events_for_move(board: chess.Board, move: chess.Move, by: str) -> list[GameEvent]:
     # `board` is the position BEFORE the move; it is left unchanged. Returns the events of
     # this move in a fixed order: MOVE, then CAPTURE, CASTLE, PROMOTION, CHECK, and last the
     # game-ending one (CHECKMATE, STALEMATE or DRAW) if the move ended the game.
     # Raises ValueError for an illegal move or an unknown `by`.
-    if by not in BY:
-        raise ValueError(f"by must be one of {BY}.")
-    if move not in board.legal_moves:
-        raise ValueError(f"Illegal move {move.uci()} in {board.fen()}")
+    check_move(board, move, by)
     color = board.turn
     ply = board.ply() + 1
     san = board.san(move)
