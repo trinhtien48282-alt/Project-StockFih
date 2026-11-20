@@ -26,6 +26,12 @@ class EventKind(Enum):
     MISTAKE = "mistake"
     BLUNDER = "blunder"
     MISSED_WIN = "missed_win"
+    # Facts about the game as a whole, made by game_events.py from numbers and headers:
+    MAJOR_SWING = "major_swing"  # the evaluation changed a lot, whoever moved
+    GAME_WON = "game_won"  # from the player's side
+    GAME_LOST = "game_lost"
+    GAME_DRAWN = "game_drawn"
+    OPENING = "opening"  # name taken from the PGN headers only
 
 
 @dataclass(frozen=True)
