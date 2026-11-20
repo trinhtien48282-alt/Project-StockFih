@@ -131,21 +131,32 @@ class Commentator:
             raise ValueError(f"Mode must be one of {MODES}.")
         self.mode = mode
 
-    def _line(self, event: GameEvent | FactEvent) -> str | None:
+    def _line(
+        self, event: GameEvent | FactEvent, avoid: frozenset[str] | set[str] = frozenset()
+    ) -> str | None:
         speaker = event.by if isinstance(event, GameEvent) else "game"
         lines = self.dialogue.get(self.mode, {}).get(speaker, {}).get(event.kind.value, [])
         values = _values(event)
         usable = [line for line in lines if _fields(line) <= values.keys()]
-        return self._rng.choice(usable).format(**values) if usable else None
+        if not usable:
+            return None
+        texts = [line.format(**values) for line in usable]
+        fresh = [text for text in texts if text not in avoid]
+        return self._rng.choice(fresh or texts)
 
-    def comment(self, events: list[GameEvent | FactEvent]) -> str | None:
-        # One line for the most notable event, or None (silent mode, or nothing worth saying).
+    def comment(
+        self,
+        events: list[GameEvent | FactEvent],
+        avoid: frozenset[str] | set[str] = frozenset(),
+    ) -> str | None:
+        # One line for the most notable event, or None. `avoid` holds recently said lines:
+        # one of them is used only when no other line fits.
         if self.mode == "silent":
             return None
         for kind in PRIORITY:
             for event in events:
                 if event.kind == kind:
-                    line = self._line(event)
+                    line = self._line(event, avoid)
                     if line:
                         return line
         return None
