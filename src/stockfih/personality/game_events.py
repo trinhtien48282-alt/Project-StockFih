@@ -15,6 +15,8 @@ OPENING_MAX_CHARS = 80  # PGN headers are external data: longer names are refuse
 class FactEvent:
     kind: EventKind
     text: str = ""  # MAJOR_SWING: "white" or "black" (who gained). OPENING: the name.
+    country: str = ""  # IDENTITY_*: display names taken from fixed tables, never typed text
+    origin: str = ""
 
 
 def major_swing(white_before: int, white_after: int) -> FactEvent | None:

@@ -32,6 +32,8 @@ class EventKind(Enum):
     GAME_LOST = "game_lost"
     GAME_DRAWN = "game_drawn"
     OPENING = "opening"  # name taken from the PGN headers only
+    IDENTITY_MATCH = "identity_match"  # made by cultural_rules.py from the user's own settings
+    IDENTITY_MISMATCH = "identity_mismatch"
 
 
 @dataclass(frozen=True)

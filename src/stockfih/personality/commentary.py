@@ -22,7 +22,8 @@ from stockfih.personality.game_events import FactEvent
 
 MODES = ("toxic_comedian", "professional", "silent")
 SPEAKERS = ("player", "stockfih", "game")  # who moved; "game" = facts about the whole game
-FIELDS = {"san", "ply", "captured", "winner", "reason", "loss", "text"}
+FIELDS = {"san", "ply", "captured", "winner", "reason", "loss", "text", "country", "origin"}
+IDENTITY_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_identity.json"
 DIALOGUE_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue.json"
 CONTEXT_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_context.json"
 CONTEXT_VALUES = {
@@ -48,6 +49,8 @@ PRIORITY = (
     EventKind.CHECK,
     EventKind.CAPTURE,
     EventKind.CASTLE,
+    EventKind.IDENTITY_MISMATCH,
+    EventKind.IDENTITY_MATCH,
     EventKind.OPENING,
     EventKind.MOVE,
 )
@@ -121,8 +124,17 @@ def _read(path: Path) -> object:
         raise ValueError(f"Could not read the dialogue file: {error}") from None
 
 
+def _merge(target: dict, source: dict) -> None:
+    # Adds `source` into `target`: dicts are merged, lists of lines are extended.
+    for key, value in source.items():
+        if isinstance(value, dict):
+            _merge(target.setdefault(key, {}), value)
+        else:
+            target.setdefault(key, []).extend(value)
+
+
 def load_dialogue(path: Path | None = None) -> dict:
-    # With no path: the shipped dialogue, with the shipped tier and mood lines merged in.
+    # With no path: the shipped dialogue, with the tier/mood and identity lines merged in.
     # With a path: that one file only. ValueError if a file is unreadable or invalid.
     if path is not None:
         data = _read(path)
@@ -130,14 +142,11 @@ def load_dialogue(path: Path | None = None) -> dict:
         return data
     data = _read(DIALOGUE_PATH)
     check_dialogue(data)
-    context = _read(CONTEXT_PATH)
-    check_dialogue(context)
-    for mode, body in context.items():
-        target = data.setdefault(mode, {})
-        for name, section in body.items():
-            bucket = target.setdefault(name, {})
-            for key, value in section.items():
-                bucket.setdefault(key, {}).update(value)
+    for extra in (CONTEXT_PATH, IDENTITY_PATH):
+        part = _read(extra)
+        check_dialogue(part)
+        for mode, body in part.items():
+            _merge(data.setdefault(mode, {}), body)
     check_dialogue(data)
     return data
 
@@ -156,8 +165,13 @@ def _values(event: GameEvent | FactEvent) -> dict[str, object]:
             values["reason"] = event.reason.replace("_", " ")
         if event.loss is not None:
             values["loss"] = event.loss
-    elif event.text:
-        values["text"] = event.text
+    else:
+        if event.text:
+            values["text"] = event.text
+        if event.country:
+            values["country"] = event.country
+        if event.origin:
+            values["origin"] = event.origin
     return values
 
 
