@@ -1,0 +1,60 @@
+{
+  "toxic_comedian": {
+    "player": {
+      "blunder": [
+        "{san}?! What the fuck was that?",
+        "{san}. {loss} centipawns gone. Holy shit."
+      ],
+      "mistake": [
+        "{san}. That's a shitty move and you know it."
+      ],
+      "checkmate": [
+        "{san}. Checkmate. Well, shit."
+      ],
+      "draw": [
+        "Draw by {reason}. Fucking boring."
+      ],
+      "missed_win": [
+        "You had a won position and shat it away. Incredible."
+      ]
+    },
+    "stockfih": {
+      "blunder": [
+        "{san}. FUCK. My fingers slipped. Obviously."
+      ],
+      "checkmate": [
+        "{san}. Checkmate. Fucking obviously."
+      ],
+      "draw": [
+        "Draw by {reason}. Fucking suspicious."
+      ],
+      "missed_win": [
+        "{san}. Missed a win. Fuck. Allegedly on purpose."
+      ]
+    },
+    "game": {
+      "game_drawn": [
+        "A draw. Fucking boring."
+      ],
+      "major_swing": [
+        "The evaluation just went to shit."
+      ]
+    },
+    "tiers": {
+      "dominant": {
+        "game": {
+          "game_lost": [
+            "GG FUCKING EZZZ."
+          ]
+        }
+      },
+      "threatened": {
+        "game": {
+          "game_won": [
+            "THIS IS FUCKING RIGGED."
+          ]
+        }
+      }
+    }
+  }
+}

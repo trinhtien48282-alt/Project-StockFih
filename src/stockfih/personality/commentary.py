@@ -26,6 +26,9 @@ FIELDS = {"san", "ply", "captured", "winner", "reason", "loss", "text", "country
 IDENTITY_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_identity.json"
 DIALOGUE_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue.json"
 CONTEXT_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_context.json"
+PROFANITY_LEVELS = ("clean", "mild", "spicy")  # each level adds lines to the one before
+MILD_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_mild.json"
+SPICY_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_spicy.json"
 CONTEXT_VALUES = {
     "tiers": frozenset(tier.value for tier in Tier),
     "moods": frozenset(mood.value for mood in Mood),
@@ -133,16 +136,28 @@ def _merge(target: dict, source: dict) -> None:
             target.setdefault(key, []).extend(value)
 
 
-def load_dialogue(path: Path | None = None) -> dict:
-    # With no path: the shipped dialogue, with the tier/mood and identity lines merged in.
+def _check_level(level: str) -> None:
+    if level not in PROFANITY_LEVELS:
+        raise ValueError(f"Profanity level must be one of {PROFANITY_LEVELS}.")
+
+
+def load_dialogue(path: Path | None = None, profanity: str = "clean") -> dict:
+    # With no path: the shipped dialogue, with the tier/mood and identity lines merged in, plus
+    # the mild lines at "mild" and "spicy" and the spicy lines at "spicy".
     # With a path: that one file only. ValueError if a file is unreadable or invalid.
+    _check_level(profanity)
     if path is not None:
         data = _read(path)
         check_dialogue(data)
         return data
     data = _read(DIALOGUE_PATH)
     check_dialogue(data)
-    for extra in (CONTEXT_PATH, IDENTITY_PATH):
+    extras = [CONTEXT_PATH, IDENTITY_PATH]
+    if profanity in ("mild", "spicy"):
+        extras.append(MILD_PATH)
+    if profanity == "spicy":
+        extras.append(SPICY_PATH)
+    for extra in extras:
         part = _read(extra)
         check_dialogue(part)
         for mode, body in part.items():
@@ -181,14 +196,27 @@ class Commentator:
         mode: str = "professional",
         dialogue: dict | None = None,
         rng: random.Random | None = None,
+        profanity: str = "clean",
     ) -> None:
         self.set_mode(mode)
+        _check_level(profanity)
         if dialogue is not None:
             check_dialogue(dialogue)
-        self.dialogue = dialogue if dialogue is not None else load_dialogue()
+        self._custom = dialogue is not None  # own dialogue: profanity levels do not apply
+        self.profanity = profanity
+        self.dialogue = dialogue if dialogue is not None else load_dialogue(profanity=profanity)
         self._rng = rng or random.Random()
         self.tier: Tier | None = None
         self.mood: Mood | None = None
+
+    def set_profanity(self, level: str) -> None:
+        # Reloads the shipped lines for `level`. ValueError for an unknown level, or when this
+        # commentator was given its own dialogue; the old lines stay then.
+        _check_level(level)
+        if self._custom:
+            raise ValueError("A commentator with its own dialogue has no profanity levels.")
+        self.dialogue = load_dialogue(profanity=level)
+        self.profanity = level
 
     def set_mode(self, mode: str) -> None:
         # ValueError for an unknown mode; the old mode stays.

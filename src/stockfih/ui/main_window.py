@@ -1,9 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QShortcut
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -15,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from stockfih.chess.game import Game
+from stockfih.personality.settings import PersonalitySettings
 from stockfih.profiles.player import Profile, ProfileStore
 from stockfih.profiles.statistics import compute
 from stockfih.ui.app_theme import apply_theme
@@ -53,6 +52,7 @@ class MainWindow(QMainWindow):
             "square": next(iter(SQUARE_THEMES)),
             "piece": next(iter(PIECE_THEMES)),
         }
+        self.personality = PersonalitySettings()
         self._color_actions: dict[str, QAction] = {}
         self._last_saved: str | None = None  # PGN of the last game written to history
         self.game = Game()
@@ -269,6 +269,7 @@ class MainWindow(QMainWindow):
             "animate": self.board.animate,
             "sound": self.sounds.enabled,
             "volume": self.sounds.volume,
+            "personality": self.personality
         }
         new = ask_settings(self, values)
         if new is None:
@@ -283,6 +284,8 @@ class MainWindow(QMainWindow):
         self._choose("piece", new["piece"])
         self._flag("animate", self.board, "animate", new["animate"])
         self._flag("sound", self.sounds, "enabled", new["sound"])
+        self.personality = new["personality"]
+        self.store.set_pref(self.profile.id, "personality", self.personality.to_json())
 
     def _flag(self, key: str, target, attr: str, on: bool) -> None:
         setattr(target, attr, on)
@@ -295,6 +298,7 @@ class MainWindow(QMainWindow):
             self.choice[key] = name if name in themes else next(iter(themes))
         self.board.animate = self.store.pref(self.profile.id, "animate", "1") == "1"
         self.sounds.enabled = self.store.pref(self.profile.id, "sound", "1") == "1"
+        self.personality = PersonalitySettings.from_json(self.store.pref(self.profile.id, "personality"))
         self._color_actions[self._color()].setChecked(True)
         self._apply_themes()
 

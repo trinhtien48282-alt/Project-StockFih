@@ -1,0 +1,44 @@
+{
+  "toxic_comedian": {
+    "player": {
+      "blunder": [
+        "{san}?! What the hell was that?",
+        "{san}. Damn. Even I felt that one."
+      ],
+      "mistake": [
+        "{san}? That's a hell of a mistake."
+      ],
+      "checkmate": [
+        "{san}. Checkmate. Well, damn."
+      ],
+      "missed_win": [
+        "You had a win and threw it away. Damn."
+      ]
+    },
+    "stockfih": {
+      "blunder": [
+        "{san}. Damn it. The mouse betrayed me."
+      ],
+      "checkmate": [
+        "{san}. Checkmate. Hell yeah."
+      ],
+      "missed_win": [
+        "{san}. Missed a win. Damn. Allegedly on purpose."
+      ]
+    },
+    "game": {
+      "game_lost": [
+        "GG. That was a hell of a beating."
+      ],
+      "game_won": [
+        "You won. Damn. I want a recount."
+      ],
+      "game_drawn": [
+        "A draw. Damn. Nobody's happy."
+      ],
+      "major_swing": [
+        "The evaluation just swung like hell."
+      ]
+    }
+  }
+}
