@@ -9,6 +9,7 @@ from stockfih.personality.ego import Mood
 from stockfih.personality.elo_personality import Tier
 from stockfih.personality.events import EventKind, GameEvent
 from stockfih.personality.game_events import FactEvent
+from stockfih.personality.game_phase import Phase
 
 # Turns structured events into one line of text. It only decides what to SAY: it imports no
 # engine and no GUI, and nothing here can change a move. A line is only ever chosen for an
@@ -29,10 +30,12 @@ CONTEXT_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_
 PROFANITY_LEVELS = ("clean", "mild", "spicy")  # each level adds lines to the one before
 MILD_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_mild.json"
 SPICY_PATH = Path(__file__).resolve().parent.parent / "resources" / "dialogue_spicy.json"
+ARROGANT_TIERS = frozenset({Tier.DOMINANT, Tier.COCKY})  # gloating tiers
 CONTEXT_VALUES = {
     "tiers": frozenset(tier.value for tier in Tier),
     "moods": frozenset(mood.value for mood in Mood),
 }
+
 
 # When one move carries several events, the first kind in this list that has a usable line wins.
 # MOVE is last and has no lines on purpose: a plain move gets no comment.
@@ -208,6 +211,7 @@ class Commentator:
         self._rng = rng or random.Random()
         self.tier: Tier | None = None
         self.mood: Mood | None = None
+        self.phase: Phase | None = None
 
     def set_profanity(self, level: str) -> None:
         # Reloads the shipped lines for `level`. ValueError for an unknown level, or when this
@@ -224,21 +228,28 @@ class Commentator:
             raise ValueError(f"Mode must be one of {MODES}.")
         self.mode = mode
 
-    def set_context(self, tier: Tier | None = None, mood: Mood | None = None) -> None:
-        # The rating tier and the ego mood for the lines that follow. None means neutral.
-        # ValueError if a value is not a Tier or a Mood; the old context stays.
+    def set_context(
+        self, tier: Tier | None = None, mood: Mood | None = None, phase: Phase | None = None
+    ) -> None:
+        # The rating tier, the ego mood and the game phase for the lines that follow. None means
+        # unknown. ValueError if a value has the wrong type; the old context stays.
         if tier is not None and not isinstance(tier, Tier):
             raise ValueError("tier must be a Tier or None.")
         if mood is not None and not isinstance(mood, Mood):
             raise ValueError("mood must be a Mood or None.")
-        self.tier, self.mood = tier, mood
+        if phase is not None and not isinstance(phase, Phase):
+            raise ValueError("phase must be a Phase or None.")
+        self.tier, self.mood, self.phase = tier, mood, phase
 
     def _pools(self, speaker: str, kind: str) -> list[list[str]]:
         # Most specific first: tier line, then mood line, then the plain line.
+        # An arrogant tier (Dominant, Cocky) gloats only while the ego is confident or unknown:
+        # once the ego drops, its lines would contradict how the game is going.
         # Professional has no context lines, so it always gets the plain line.
         modes = self.dialogue.get(self.mode, {})
         pools = []
-        if self.tier is not None:
+        gloat_ok = self.mood in (None, Mood.CONFIDENT) or self.tier not in ARROGANT_TIERS
+        if self.tier is not None and gloat_ok:
             tier_lines = modes.get("tiers", {}).get(self.tier.value, {})
             pools.append(tier_lines.get(speaker, {}).get(kind, []))
         if self.mood is not None:
@@ -250,6 +261,10 @@ class Commentator:
     def _line(
         self, event: GameEvent | FactEvent, avoid: frozenset[str] | set[str] = frozenset()
     ) -> str | None:
+                # An opening remark is dropped once the game is known to be past the opening.
+        if event.kind is EventKind.OPENING and self.phase not in (None, Phase.OPENING):
+            return None
+
         speaker = event.by if isinstance(event, GameEvent) else "game"
         values = _values(event)
         for lines in self._pools(speaker, event.kind.value):

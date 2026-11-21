@@ -22,7 +22,7 @@
         "{san}. My {captured} sends its regards."
       ],
       "castle": [
-        "Castling already. Bold of you to assume the king is safe.",
+        "Castling. Bold of you to assume the king is safe.",
         "{san}. Hiding the king. Classic."
       ],
       "promotion": [

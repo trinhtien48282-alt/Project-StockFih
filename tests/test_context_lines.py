@@ -58,10 +58,16 @@ def test_mood_line_is_used_when_no_tier_is_set():
     assert c.comment(cap()) == "mood pawn"
 
 
-def test_tier_line_beats_mood_line():
+def test_tier_line_beats_mood_line_when_the_tier_may_gloat():
+    c = make()
+    c.set_context(tier=Tier.DOMINANT, mood=Mood.CONFIDENT)
+    assert c.comment(cap()) == "tier pawn"
+
+
+def test_mood_line_replaces_a_gloating_tier_line_when_excusing():
     c = make()
     c.set_context(tier=Tier.DOMINANT, mood=Mood.EXCUSES)
-    assert c.comment(cap()) == "tier pawn"
+    assert c.comment(cap()) == "mood pawn"
 
 
 def test_mood_line_used_when_the_tier_has_none():
